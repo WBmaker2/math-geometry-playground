@@ -42,6 +42,8 @@ export class App {
   private dragging = false;
   private lastX = 0;
   private lastY = 0;
+  private controlsKey = '';
+  private sideCleanup: (() => void) | null = null;
 
   constructor(private root: HTMLElement) {
     this.planeHelper = new THREE.Mesh(
@@ -185,16 +187,35 @@ export class App {
       this.cap.geometry.dispose();
       this.cap = null;
     }
-    this.water = null;
-    this.unitCubes = null;
+    if (this.water) {
+      this.stage.remove(this.water);
+      this.water.geometry.dispose();
+      this.water = null;
+    }
+    if (this.unitCubes) {
+      this.stage.remove(this.unitCubes);
+      this.unitCubes.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (m.geometry) (m.geometry as THREE.BufferGeometry).dispose();
+      });
+      this.unitCubes = null;
+    }
   }
 
   private syncFromStore() {
     const s = store.get();
-    try {
-      this.renderControls(s.view);
-    } catch {
-      /* noop */
+    // 컨트롤 DOM은 뷰/입체가 바뀔 때만 다시 만든다.
+    // 슬라이더 드래그 중에는 입력 요소를 교체하지 않는다 (끊김 방지).
+    const controlsKey = `${s.view}:${s.solidId}`;
+    if (controlsKey !== this.controlsKey) {
+      this.controlsKey = controlsKey;
+      try {
+        this.renderControls(s.view);
+      } catch {
+        /* noop */
+      }
+    } else {
+      this.syncControlValues();
     }
     const canvas = this.root.querySelector<HTMLCanvasElement>('#scene');
     const quizSec = this.root.querySelector<HTMLElement>('#quiz-sec')!;
@@ -297,10 +318,12 @@ export class App {
       });
       if (this.water) {
         const size = defaultSize(s.solidId);
-        this.water.visible = !store.get().showUnitCubes;
+        // 펼치면(전개도) 물·단위立方체는 숨겨 전개도가 겹쳐 보이지 않게
+        const showFill = !store.get().showUnitCubes && s.unfoldT < 0.5;
+        this.water.visible = showFill;
         this.water.scale.y = Math.max(0.001, size.s * s.volumeFill);
       }
-      if (this.unitCubes) this.unitCubes.visible = store.get().showUnitCubes;
+      if (this.unitCubes) this.unitCubes.visible = store.get().showUnitCubes && s.unfoldT < 0.5;
     } else if (s.view === 'slice') {
       this.net.group.visible = false;
       this.solid.visible = true;
@@ -358,7 +381,38 @@ export class App {
     }
   }
 
+  /** 뷰/입체 변경 없이 값만 바뀌었을 때: DOM을 다시 만들지 않고 값만 갱신. */
+  private syncControlValues() {
+    const s = store.get();
+    if (s.view === 'solid') {
+      const fill = this.root.querySelector<HTMLInputElement>('#fill');
+      if (fill && document.activeElement !== fill) {
+        fill.value = String(Math.round(s.volumeFill * 100));
+      }
+      const fillVal = this.root.querySelector('#fill-val');
+      if (fillVal) fillVal.textContent = `${Math.round(s.volumeFill * 100)}%`;
+    } else if (s.view === 'func') {
+      const v = parabolaVertex({ a: s.a, b: s.b, c: s.c });
+      const fv = this.root.querySelector('#func-vertex');
+      if (fv) fv.innerHTML = `x=${v.x.toFixed(2)}, y=${v.y.toFixed(2)}`;
+      for (const k of ['a', 'b', 'c', 'A', 'B', 'C', 'D'] as const) {
+        const input = this.root.querySelector<HTMLInputElement>(`#f-${k}`);
+        if (input && document.activeElement !== input) input.value = String(s[k]);
+        const span = input?.parentElement?.querySelector('span');
+        if (span) span.textContent = String(s[k]);
+      }
+    } else if (s.view === 'slice') {
+      for (const [id, val] of [['#soff', s.sliceOffset * 100], ['#stilt', s.sliceTilt * 100]] as const) {
+        const input = this.root.querySelector<HTMLInputElement>(id);
+        if (input && document.activeElement !== input) input.value = String(Math.round(val));
+      }
+    }
+  }
+
   private renderControls(view: ViewId) {
+    // 이전 컨트롤의 스토어 구독 해제 (누수 방지)
+    this.sideCleanup?.();
+    this.sideCleanup = null;
     const box = this.root.querySelector('#view-controls')!;
     const side = this.root.querySelector('#side-controls')!;
     const s = store.get();
@@ -366,11 +420,11 @@ export class App {
       box.innerHTML = `<p class="hint">하단 슬라이더로 펼치기 · 드래그로 회전</p>`;
       side.innerHTML = `
         <div id="unfold-box"></div>
-        <label>물 채우기(부피) <span>${Math.round(s.volumeFill * 100)}%</span>
+        <label>물 채우기(부피) <span id="fill-val">${Math.round(s.volumeFill * 100)}%</span>
           <input id="fill" type="range" min="0" max="100" value="${Math.round(s.volumeFill * 100)}" aria-label="부피 물 채우기" /></label>
         <label class="check"><input id="cubes" type="checkbox" ${s.showUnitCubes ? 'checked' : ''} /> 단위立方(작은 정육면체) 보기</label>
         <label class="check"><input id="rot" type="checkbox" ${s.autoRotate ? 'checked' : ''} /> 자동 회전</label>`;
-      mountUnfoldSlider(side.querySelector('#unfold-box')!);
+      this.sideCleanup = mountUnfoldSlider(side.querySelector('#unfold-box')!);
       side.querySelector('#fill')!.addEventListener('input', (e) =>
         store.set({ volumeFill: Number((e.target as HTMLInputElement).value) / 100 }),
       );
@@ -399,7 +453,7 @@ export class App {
       );
     } else if (view === 'func') {
       const v = parabolaVertex({ a: s.a, b: s.b, c: s.c });
-      box.innerHTML = `<p class="hint">포물선 꼭짓점: <strong>x=${v.x.toFixed(2)}, y=${v.y.toFixed(2)}</strong> (−b/2a)</p>`;
+      box.innerHTML = `<p class="hint">포물선 꼭짓점: <strong id="func-vertex">x=${v.x.toFixed(2)}, y=${v.y.toFixed(2)}</strong> (−b/2a)</p>`;
       side.innerHTML = `
         <h2>함수 계수</h2>
         <label>종류 <select id="fkind" aria-label="함수 종류">

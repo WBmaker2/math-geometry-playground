@@ -3,7 +3,7 @@ import { solidMeta, surfaceArea, volume, defaultSize } from '../geo/solids';
 import { parabolaVertex } from '../geo/functions';
 import { store } from '../stores/solidStore';
 
-export function mountUnfoldSlider(el: HTMLElement) {
+export function mountUnfoldSlider(el: HTMLElement): () => void {
   el.innerHTML = `
     <label class="slider-row">펼치기 <span id="unfold-val">0%</span>
       <input id="unfold" type="range" min="0" max="100" value="${Math.round(store.get().unfoldT * 100)}" aria-label="전개도 펼치기 정도" />
@@ -15,8 +15,11 @@ export function mountUnfoldSlider(el: HTMLElement) {
   const input = el.querySelector<HTMLInputElement>('#unfold')!;
   const val = el.querySelector('#unfold-val')!;
   const sync = () => {
-    input.value = String(Math.round(store.get().unfoldT * 100));
-    val.textContent = `${input.value}%`;
+    // 드래그 중인 입력은 건드리지 않는다 (끊김 방지)
+    if (document.activeElement !== input) {
+      input.value = String(Math.round(store.get().unfoldT * 100));
+    }
+    val.textContent = `${Math.round(store.get().unfoldT * 100)}%`;
   };
   input.addEventListener('input', () => {
     store.set({ unfoldT: Number(input.value) / 100 });
@@ -29,7 +32,7 @@ export function mountUnfoldSlider(el: HTMLElement) {
     if (ph) ph.textContent = '전개도가 펼쳐졌습니다. 면의 개수를 세어 보세요.';
   });
   el.querySelector('#fold-back')!.addEventListener('click', () => animateTo(0));
-  store.subscribe(sync);
+  return store.subscribe(sync);
 
   function animateTo(target: number) {
     const from = store.get().unfoldT;

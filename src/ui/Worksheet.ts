@@ -4,8 +4,11 @@ import { solidMeta } from '../geo/solids';
 import { store } from '../stores/solidStore';
 
 export function mountWorksheet(el: HTMLElement) {
+  let lastId = '';
   const render = () => {
     const id = store.get().solidId;
+    if (id === lastId && el.querySelector('[data-testid="net-svg"]')) return;
+    lastId = id;
     const meta = solidMeta(id);
     const svg = buildNetSVG(id);
     el.innerHTML = `
