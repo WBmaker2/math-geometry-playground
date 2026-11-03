@@ -73,7 +73,7 @@ export function getNetFaces2D(id: SolidId, s = 100): NetFace2D[] {
         points: [[x, y], [x + rw, y], [x + rw, y + rh], [x, y + rh]],
       });
       return [
-        rect(w, 0, w, d, '위', 'top'),
+        rect(h, 0, w, d, '위', 'top'),
         rect(0, d, h, d, '왼쪽', 'left'),
         rect(h, d, w, d, '앞', 'front'),
         rect(h + w, d, h, d, '오른쪽', 'right'),
@@ -83,19 +83,24 @@ export function getNetFaces2D(id: SolidId, s = 100): NetFace2D[] {
     }
     case 'tri-prism': {
       const h = (Math.sqrt(3) / 2) * s;
-      const tri = (x: number, y: number, flip: boolean, label: string, hid: string): NetFace2D => ({
-        id: hid, label, hinge: hid,
-        points: flip ? [[x, y], [x + s, y], [x + s / 2, y + h]] : [[x, y + h], [x + s, y + h], [x + s / 2, y]],
-      });
       const r = (x: number, y: number, label: string, hid: string): NetFace2D => ({
         id: hid, label, hinge: hid, points: [[x, y], [x + s, y], [x + s, y + s], [x, y + s]],
       });
+      // 삼각형은 가운데 직사각형의 위·아래 변과 온전히 맞닿게 (변 공유)
+      const triTop: NetFace2D = {
+        id: 'tri-top', label: '삼각형·위', hinge: 'tri-top',
+        points: [[s, h], [2 * s, h], [1.5 * s, 0]],
+      };
+      const triBottom: NetFace2D = {
+        id: 'tri-bottom', label: '삼각형·아래', hinge: 'tri-bottom',
+        points: [[s, h + s], [2 * s, h + s], [1.5 * s, 2 * h + s]],
+      };
       return [
-        tri(s, 0, true, '삼각형·위', 'tri-top'),
+        triTop,
         r(0, h, '직사각형1', 'side1'),
         r(s, h, '직사각형2', 'side2'),
         r(2 * s, h, '직사각형3', 'side3'),
-        tri(s, h + s, false, '삼각형·아래', 'tri-bottom'),
+        triBottom,
       ];
     }
     case 'square-pyramid': {
@@ -152,10 +157,13 @@ export function getNetFaces2D(id: SolidId, s = 100): NetFace2D[] {
         pts.push([l * Math.cos(a), l * Math.sin(a)]);
       }
       const shift: Vec2[] = pts.map(([x, y]) => [x + l + 10, y + l + 10]);
+      // 밑면 원: 부채꼴 호의 한가운데 점(각도 0)에 바깥쪽으로 접하게 배치 (겹침 방지)
+      const arcMidX = l + 10 + l;
+      const arcMidY = l + 10;
       const cpts: Vec2[] = [];
       for (let i = 0; i < 24; i++) {
         const a = (i / 24) * Math.PI * 2;
-        cpts.push([2 * l + 20 + r * Math.cos(a), l + r * Math.sin(a)]);
+        cpts.push([arcMidX + r + r * Math.cos(a), arcMidY + r * Math.sin(a)]);
       }
       return [
         { id: 'sector', label: '옆면(부채꼴)', hinge: 'sector', points: shift },

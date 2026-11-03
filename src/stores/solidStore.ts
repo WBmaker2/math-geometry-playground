@@ -13,6 +13,7 @@ export interface StoreState {
   sliceOffset: number; // -1..1
   sliceTilt: number; // 0..1
   sliceDiagonal: boolean;
+  sliceIsolate: boolean; // 단면만 보기
   funcKind: FuncKind;
   a: number; b: number; c: number;
   A: number; B: number; C: number; D: number;
@@ -29,6 +30,7 @@ const initial: StoreState = {
   sliceOffset: 0,
   sliceTilt: 0,
   sliceDiagonal: false,
+  sliceIsolate: false,
   funcKind: 'quad',
   a: 1, b: 0, c: 0,
   A: 1, B: 1, C: 0, D: 0,

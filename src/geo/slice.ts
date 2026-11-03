@@ -117,3 +117,19 @@ export function nameCrossSection(sides: number): SectionInfo {
 export function sliceCubeDiagonal(s = 2): Vec3[] {
   return intersectConvex(cubeVertices(s), cubeEdges(), { normal: normalize([1, 1, 1]), constant: 0 });
 }
+
+/** 3D 다각형의 넓이 (Newell 방법 — 어느 평면에 있어도 동작). */
+export function polygonArea3D(points: Vec3[]): number {
+  if (points.length < 3) return 0;
+  let nx = 0;
+  let ny = 0;
+  let nz = 0;
+  for (let i = 0; i < points.length; i++) {
+    const [x1, y1, z1] = points[i];
+    const [x2, y2, z2] = points[(i + 1) % points.length];
+    nx += (y1 - y2) * (z1 + z2);
+    ny += (z1 - z2) * (x1 + x2);
+    nz += (x1 - x2) * (y1 + y2);
+  }
+  return Math.hypot(nx, ny, nz) / 2;
+}

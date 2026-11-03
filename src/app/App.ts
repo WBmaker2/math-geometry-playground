@@ -2,7 +2,8 @@
 // Single WebGLRenderer, view switching, drag-orbit, live updates.
 import * as THREE from 'three';
 import { defaultSize, solidMeta, supportsVolumeFill } from '../geo/solids';
-import { nameCrossSection, cubeVertices, cubeEdges, intersectConvex, normalize } from '../geo/slice';
+import { nameCrossSection, cubeVertices, cubeEdges, intersectConvex, normalize, polygonArea3D } from '../geo/slice';
+import type { Vec3 } from '../geo/nets';
 import { parabolaVertex } from '../geo/functions';
 import { solidGroup } from '../scene/SolidMesh';
 import { NetMorph } from '../scene/NetMorph';
@@ -43,6 +44,7 @@ export class App {
   private lastY = 0;
   private controlsKey = '';
   private sideCleanup: (() => void) | null = null;
+  private lastSliceFrame: { center: THREE.Vector3; dir: THREE.Vector3 } | null = null;
 
   constructor(private root: HTMLElement) {
     this.planeHelper = new THREE.Mesh(
@@ -54,6 +56,30 @@ export class App {
     this.syncFromStore();
     store.subscribe(() => this.syncFromStore());
     this.loop();
+    if (import.meta.env.DEV) {
+      (window as unknown as Record<string, unknown>).__app = this;
+    }
+  }
+
+  /** DEV 전용: 단면 디버그 스냅샷 */
+  sliceDebug(): Record<string, unknown> {
+    const capPts: number[][] = [];
+    if (this.cap) {
+      const pos = this.cap.geometry.getAttribute('position') as THREE.BufferAttribute;
+      for (let i = 0; i < pos.count; i++) {
+        capPts.push([pos.getX(i), pos.getY(i), pos.getZ(i)]);
+      }
+    }
+    return {
+      autoRotate: store.get().autoRotate,
+      stageRot: [this.stage.rotation.x, this.stage.rotation.y],
+      camPos: this.camera.position.toArray(),
+      camDir: new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 2).toArray(),
+      frame: this.lastSliceFrame
+        ? { center: this.lastSliceFrame.center.toArray(), dir: this.lastSliceFrame.dir.toArray() }
+        : null,
+      capCount: capPts.length,
+    };
   }
 
   private buildDOM() {
@@ -309,7 +335,8 @@ export class App {
       }
     } else if (s.view === 'slice') {
       this.net.group.visible = false;
-      this.solid.visible = true;
+      // 단면만 보기: 입체를 숨기고 잘린 면(캡)만 남긴다
+      this.solid.visible = !s.sliceIsolate;
       if (this.unitCubes) this.unitCubes.visible = false;
       this.solid.traverse((o) => {
         const m = o as THREE.Mesh;
@@ -323,7 +350,8 @@ export class App {
       const constant = -s.sliceOffset * (size.s * 0.8);
       this.clipPlane.normal.set(n[0], n[1], n[2]);
       this.clipPlane.constant = constant;
-      this.planeHelper.visible = true;
+      // 단면만 보기에서는 자르는 평면 표시도 숨긴다
+      this.planeHelper.visible = !s.sliceIsolate;
       this.planeHelper.position.set(-n[0] * constant, -n[1] * constant, -n[2] * constant);
       this.planeHelper.lookAt(this.planeHelper.position.clone().add(new THREE.Vector3(n[0], n[1], n[2])));
       // 캡: 입체별 근사 정점
@@ -345,6 +373,18 @@ export class App {
       if (cap) {
         this.stage.add(cap);
         this.cap = cap;
+        // 정면 보기용: 캡 무게중심과 법선을 월드 기준으로 저장
+        this.stage.updateWorldMatrix(true, true);
+        const c: Vec3 = [
+          pts.reduce((a, p) => a + p[0], 0) / pts.length,
+          pts.reduce((a, p) => a + p[1], 0) / pts.length,
+          pts.reduce((a, p) => a + p[2], 0) / pts.length,
+        ];
+        const center = new THREE.Vector3(c[0], c[1], c[2]).applyMatrix4(this.stage.matrixWorld);
+        const dir = new THREE.Vector3(n[0], n[1], n[2]).applyQuaternion(this.stage.quaternion).normalize();
+        this.lastSliceFrame = { center, dir };
+      } else {
+        this.lastSliceFrame = null;
       }
       const label = this.root.querySelector('#slice-result');
       if (label) {
@@ -356,11 +396,22 @@ export class App {
         } else {
           const info = nameCrossSection(pts.length);
           nameKo = info.nameKo;
-          extra = pts.length === 6 ? '정육면체 대각 단면 = 정육각형!' : `${solidMeta(s.solidId).nameKo} 단면: ${info.nameKo} (${pts.length}개 점)`;
+          const area = polygonArea3D(pts);
+          const areaTxt = pts.length >= 3 ? ` · 넓이 약 <strong data-testid="slice-area">${area.toFixed(2)}</strong>` : '';
+          extra = pts.length === 6 ? `정육면체 대각 단면 = 정육각형!${areaTxt}` : `${solidMeta(s.solidId).nameKo} 단면: ${info.nameKo} (${pts.length}개 점)${areaTxt}`;
         }
         label.innerHTML = `<strong data-testid="slice-name">${nameKo}</strong> — ${extra}`;
       }
     }
+  }
+
+  /** 단면을 정면에서 보기: 카메라를 캡 법선 방향으로 이동 + 자동 회전 정지. */
+  private viewSliceFront() {
+    const f = this.lastSliceFrame;
+    if (!f) return;
+    store.set({ autoRotate: false });
+    this.camera.position.copy(f.center).addScaledVector(f.dir, 7);
+    this.camera.lookAt(f.center);
   }
 
   /** 뷰/입체 변경 없이 값만 바뀌었을 때: DOM을 다시 만들지 않고 값만 갱신. */
@@ -418,7 +469,9 @@ export class App {
         <label>평면 위치 <input id="soff" type="range" min="-100" max="100" value="${Math.round(s.sliceOffset * 100)}" aria-label="단면 평면 위치" /></label>
         <label>평면 기울기 <input id="stilt" type="range" min="0" max="100" value="${Math.round(s.sliceTilt * 100)}" aria-label="단면 평면 기울기" /></label>
         <label class="check"><input id="sdiag" type="checkbox" ${s.sliceDiagonal ? 'checked' : ''} /> 대각선으로 자르기(육각형 도전)</label>
-        <p class="hint">정육면체를 대각선으로 자르면 <strong>육각형</strong>이 나와요.</p>`;
+        <label class="check"><input id="sisolate" type="checkbox" ${s.sliceIsolate ? 'checked' : ''} /> 단면만 보기 (입체 숨기기)</label>
+        <div class="row"><button type="button" id="sfront" class="btn-pulse">단면을 정면에서 보기</button></div>
+        <p class="hint">정육면체를 대각선으로 자르면 <strong>육각형</strong>이 나와요. 단면만 보기로 잘린 모양을 크게 확인하세요.</p>`;
       side.querySelector('#soff')!.addEventListener('input', (e) =>
         store.set({ sliceOffset: Number((e.target as HTMLInputElement).value) / 100 }),
       );
@@ -428,6 +481,10 @@ export class App {
       side.querySelector('#sdiag')!.addEventListener('change', (e) =>
         store.set({ sliceDiagonal: (e.target as HTMLInputElement).checked }),
       );
+      side.querySelector('#sisolate')!.addEventListener('change', (e) =>
+        store.set({ sliceIsolate: (e.target as HTMLInputElement).checked }),
+      );
+      side.querySelector('#sfront')!.addEventListener('click', () => this.viewSliceFront());
     } else if (view === 'func') {
       const v = parabolaVertex({ a: s.a, b: s.b, c: s.c });
       box.innerHTML = `<p class="hint">포물선 꼭짓점: <strong id="func-vertex">x=${v.x.toFixed(2)}, y=${v.y.toFixed(2)}</strong> (−b/2a)</p>`;

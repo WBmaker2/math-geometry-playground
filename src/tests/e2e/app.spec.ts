@@ -16,10 +16,13 @@ test('8 solids picker + slice hexagon + function vertex', async ({ page }) => {
   // surface readout exists
   await expect(page.getByTestId('surface-value')).toBeVisible();
 
-  // slice tab → diagonal → hexagon
+  // slice tab → diagonal → hexagon + area + isolate + front view
   await page.getByRole('tab', { name: '단면 자르기' }).click();
   await page.getByLabel('대각선으로 자르기').check();
   await expect(page.getByTestId('slice-name')).toContainText('육각형');
+  await expect(page.getByTestId('slice-area')).toBeVisible();
+  await page.getByLabel('단면만 보기').check();
+  await page.getByRole('button', { name: '단면을 정면에서 보기' }).click();
 
   // function tab → vertex + sliders
   await page.getByRole('tab', { name: '함수 그래프' }).click();
