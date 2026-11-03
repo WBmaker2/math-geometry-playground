@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { foldAngle, lerpFold, meanAbsZ, maxDeviation, buildNetSVG, getNetFaces2D } from '../../geo/nets';
 import { sliceCubeDiagonal, nameCrossSection, cubeVertices, cubeEdges, intersectConvex, normalize } from '../../geo/slice';
 import { parabolaVertex } from '../../geo/functions';
-import { solidMeta } from '../../geo/solids';
+import { solidMeta, supportsVolumeFill } from '../../geo/solids';
 
 describe('unfold t=0 closed / t=1 flat', () => {
   it('foldAngle endpoints', () => {
@@ -60,6 +60,19 @@ describe('print SVG contains 6 faces for cube', () => {
   it('all solids face counts match metadata', () => {
     for (const m of ['cube', 'cuboid', 'tri-prism', 'square-pyramid', 'tetra', 'cylinder', 'cone', 'sphere'] as const) {
       expect(getNetFaces2D(m).length).toBeGreaterThanOrEqual(1);
+    }
+  });
+});
+
+describe('volume fill gating', () => {
+  it('상자형(정육면체·직육면체)에서만 물 채우기를 지원', () => {
+    expect(supportsVolumeFill('cube')).toBe(true);
+    expect(supportsVolumeFill('cuboid')).toBe(true);
+  });
+
+  it('기둥·뿔·구에서는 물 채우기 미지원 (박스가 겉으로 삐져나옴 방지)', () => {
+    for (const id of ['tri-prism', 'square-pyramid', 'tetra', 'cylinder', 'cone', 'sphere'] as const) {
+      expect(supportsVolumeFill(id)).toBe(false);
     }
   });
 });

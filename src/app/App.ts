@@ -1,7 +1,7 @@
 // App — SolidView / SliceView / FunctionView + 우측 공식 패널.
 // Single WebGLRenderer, view switching, drag-orbit, live updates.
 import * as THREE from 'three';
-import { defaultSize, solidMeta } from '../geo/solids';
+import { defaultSize, solidMeta, supportsVolumeFill } from '../geo/solids';
 import { nameCrossSection, cubeVertices, cubeEdges, intersectConvex, normalize } from '../geo/slice';
 import { parabolaVertex } from '../geo/functions';
 import { solidGroup } from '../scene/SolidMesh';
@@ -311,19 +311,29 @@ export class App {
       // 펼칠수록 입체는 투명하게, 전개도는 선명하게
       this.solid.visible = s.unfoldT < 0.85;
       this.net.group.visible = s.unfoldT > 0.02;
+      const boxLike = supportsVolumeFill(s.solidId);
+      const showFill = boxLike && !store.get().showUnitCubes && s.unfoldT < 0.5;
+      const showCubes = boxLike && store.get().showUnitCubes && s.unfoldT < 0.5;
+      // 물·단위立方체를 볼 때는 상자를 유리처럼 비치게 (내용물이 보이도록)
+      const glass = showFill || showCubes;
       this.solid.traverse((o) => {
         const m = o as THREE.Mesh;
         const mat = m.material as THREE.MeshStandardMaterial | undefined;
-        if (mat && 'opacity' in mat) mat.opacity = 0.96 * (1 - s.unfoldT * 0.7);
+        if (mat && 'opacity' in mat) {
+          mat.opacity = glass ? 0.28 : 0.96 * (1 - s.unfoldT * 0.7);
+        }
       });
       if (this.water) {
         const size = defaultSize(s.solidId);
+        // 상자형(정육면체·직육면체)에서만 물 채우기 표시.
+        // 다른 입체에서는 박스형 물통이 겉으로 삐져나와 이상하게 보여 숨긴다.
         // 펼치면(전개도) 물·단위立方체는 숨겨 전개도가 겹쳐 보이지 않게
-        const showFill = !store.get().showUnitCubes && s.unfoldT < 0.5;
         this.water.visible = showFill;
         this.water.scale.y = Math.max(0.001, size.s * s.volumeFill);
       }
-      if (this.unitCubes) this.unitCubes.visible = store.get().showUnitCubes && s.unfoldT < 0.5;
+      if (this.unitCubes) {
+        this.unitCubes.visible = showCubes;
+      }
     } else if (s.view === 'slice') {
       this.net.group.visible = false;
       this.solid.visible = true;
@@ -418,17 +428,22 @@ export class App {
     const s = store.get();
     if (view === 'solid') {
       box.innerHTML = `<p class="hint">하단 슬라이더로 펼치기 · 드래그로 회전</p>`;
+      const fillable = supportsVolumeFill(s.solidId);
       side.innerHTML = `
         <div id="unfold-box"></div>
+        ${fillable ? `
         <label>물 채우기(부피) <span id="fill-val">${Math.round(s.volumeFill * 100)}%</span>
           <input id="fill" type="range" min="0" max="100" value="${Math.round(s.volumeFill * 100)}" aria-label="부피 물 채우기" /></label>
         <label class="check"><input id="cubes" type="checkbox" ${s.showUnitCubes ? 'checked' : ''} /> 단위立方(작은 정육면체) 보기</label>
+        ` : `
+        <p class="hint">물 채우기·단위立方체는 상자 모양(정육면체·직육면체)에서만 볼 수 있어요.</p>
+        `}
         <label class="check"><input id="rot" type="checkbox" ${s.autoRotate ? 'checked' : ''} /> 자동 회전</label>`;
       this.sideCleanup = mountUnfoldSlider(side.querySelector('#unfold-box')!);
-      side.querySelector('#fill')!.addEventListener('input', (e) =>
+      side.querySelector('#fill')?.addEventListener('input', (e) =>
         store.set({ volumeFill: Number((e.target as HTMLInputElement).value) / 100 }),
       );
-      side.querySelector('#cubes')!.addEventListener('change', (e) =>
+      side.querySelector('#cubes')?.addEventListener('change', (e) =>
         store.set({ showUnitCubes: (e.target as HTMLInputElement).checked }),
       );
       side.querySelector('#rot')!.addEventListener('change', (e) =>

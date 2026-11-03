@@ -129,3 +129,8 @@ export function solidMeta(id: SolidId): SolidMeta {
   if (!m) throw new Error(`unknown solid: ${id}`);
   return m;
 }
+
+/** 물 채우기·단위立方체가 성립하는 상자형 입체인지 (박스형 물통만 정확히 채울 수 있음). */
+export function supportsVolumeFill(id: SolidId): boolean {
+  return id === 'cube' || id === 'cuboid';
+}
