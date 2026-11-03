@@ -2,7 +2,7 @@
 // Single WebGLRenderer, view switching, drag-orbit, live updates.
 import * as THREE from 'three';
 import { defaultSize, solidMeta, supportsVolumeFill } from '../geo/solids';
-import { nameCrossSection, cubeVertices, cubeEdges, intersectConvex, normalize, polygonArea3D } from '../geo/slice';
+import { nameCrossSection, cubeVertices, cubeEdges, intersectConvex, intersectTriangles, normalize, polygonArea3D } from '../geo/slice';
 import type { Vec3 } from '../geo/nets';
 import { parabolaVertex } from '../geo/functions';
 import { solidGroup } from '../scene/SolidMesh';
@@ -354,7 +354,7 @@ export class App {
       this.planeHelper.visible = !s.sliceIsolate;
       this.planeHelper.position.set(-n[0] * constant, -n[1] * constant, -n[2] * constant);
       this.planeHelper.lookAt(this.planeHelper.position.clone().add(new THREE.Vector3(n[0], n[1], n[2])));
-      // 캡: 입체별 근사 정점
+      // 캡: 입체별 근사 정점 (다면체는 볼록 교선, 곡면은 렌더 지오메트리 교선)
       let verts = cubeVertices(size.s);
       let edges = cubeEdges();
       if (s.solidId === 'tetra') {
@@ -362,7 +362,18 @@ export class App {
         verts = [[r, r, r], [-r, -r, r], [-r, r, -r], [r, -r, -r]];
         edges = [[0, 1], [0, 2], [0, 3], [1, 2], [1, 3], [2, 3]];
       }
-      const pts = curved ? [] : intersectConvex(verts, edges, { normal: n, constant });
+      let pts: Vec3[];
+      if (curved) {
+        const mesh = this.solid.children.find((c) => (c as THREE.Mesh).isMesh) as THREE.Mesh | undefined;
+        const geo = mesh?.geometry as THREE.BufferGeometry | undefined;
+        const pos = geo?.getAttribute('position') as THREE.BufferAttribute | undefined;
+        const idx = geo?.getIndex();
+        pts = pos
+          ? intersectTriangles(pos.array as Float32Array, idx ? (idx.array as Uint32Array) : null, { normal: n, constant })
+          : [];
+      } else {
+        pts = intersectConvex(verts, edges, { normal: n, constant });
+      }
       if (this.cap) {
         this.stage.remove(this.cap);
         this.cap.geometry.dispose();
@@ -390,14 +401,18 @@ export class App {
       if (label) {
         let nameKo: string;
         let extra: string;
+        const areaTxt = pts.length >= 3 ? ` · 넓이 약 <strong data-testid="slice-area">${polygonArea3D(pts).toFixed(2)}</strong>` : '';
         if (curved) {
-          nameKo = s.sliceTilt < 0.25 ? '원' : '타원';
-          extra = `${solidMeta(s.solidId).nameKo}를 자르면 ${nameKo}이 나와요`;
+          if (pts.length < 3) {
+            nameKo = '만나지 않음';
+            extra = `${solidMeta(s.solidId).nameKo}와 평면이 만나지 않아요. 위치를 옮겨 보세요.`;
+          } else {
+            nameKo = s.sliceTilt < 0.25 ? '원' : '타원';
+            extra = `${solidMeta(s.solidId).nameKo}를 자르면 ${nameKo}이 나와요${areaTxt}`;
+          }
         } else {
           const info = nameCrossSection(pts.length);
           nameKo = info.nameKo;
-          const area = polygonArea3D(pts);
-          const areaTxt = pts.length >= 3 ? ` · 넓이 약 <strong data-testid="slice-area">${area.toFixed(2)}</strong>` : '';
           extra = pts.length === 6 ? `정육면체 대각 단면 = 정육각형!${areaTxt}` : `${solidMeta(s.solidId).nameKo} 단면: ${info.nameKo} (${pts.length}개 점)${areaTxt}`;
         }
         label.innerHTML = `<strong data-testid="slice-name">${nameKo}</strong> — ${extra}`;

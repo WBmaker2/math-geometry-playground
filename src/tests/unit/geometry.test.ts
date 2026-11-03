@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { foldAngle, lerpFold, meanAbsZ, maxDeviation, buildNetSVG, getNetFaces2D } from '../../geo/nets';
 import type { Vec2 } from '../../geo/nets';
 import type { SolidId } from '../../geo/solids';
-import { sliceCubeDiagonal, nameCrossSection, cubeVertices, cubeEdges, intersectConvex, normalize, polygonArea3D } from '../../geo/slice';
+import { sliceCubeDiagonal, nameCrossSection, cubeVertices, cubeEdges, intersectConvex, intersectTriangles, normalize, polygonArea3D } from '../../geo/slice';
 import { parabolaVertex } from '../../geo/functions';
 import { solidMeta, supportsVolumeFill } from '../../geo/solids';
 
@@ -43,6 +43,20 @@ describe('slice cube diagonal yields hexagon', () => {
     expect(polygonArea3D([[0, 0, 0], [1, 0, 0], [0, 1, 0]])).toBeCloseTo(0.5, 9);
     // 기울어진 평면에서도 같은 넓이 (2x2 정사각형을 3D로 회전)
     expect(polygonArea3D([[0, 0, 0], [2, 0, 0], [2, 1, 1], [0, 1, 1]])).toBeCloseTo(2 * Math.SQRT2, 9);
+  });
+
+  it('mesh path: 삼각형 메쉬 정육면체 대각 단면도 육각형', () => {
+    // 렌더 지오메트리 방식 검증용 손수 정육면체 (곡면 입체와 같은 코드 경로)
+    const v = cubeVertices(2);
+    const quads = [[0, 1, 2, 3], [4, 5, 6, 7], [0, 1, 5, 4], [2, 3, 7, 6], [0, 3, 7, 4], [1, 2, 6, 5]];
+    const positions: number[] = [];
+    v.forEach((p) => positions.push(p[0], p[1], p[2]));
+    const index: number[] = [];
+    for (const [a, b, c, d] of quads) index.push(a, b, c, a, c, d);
+    const pts = intersectTriangles(positions, index, { normal: normalize([1, 1, 1]), constant: 0 });
+    expect(pts.length).toBe(6);
+    expect(nameCrossSection(pts.length).nameKo).toBe('육각형');
+    expect(polygonArea3D(pts)).toBeGreaterThan(0);
   });
 });
 

@@ -118,6 +118,90 @@ export function sliceCubeDiagonal(s = 2): Vec3[] {
   return intersectConvex(cubeVertices(s), cubeEdges(), { normal: normalize([1, 1, 1]), constant: 0 });
 }
 
+/**
+ * 삼각형 메쉬와 평면의 교선 — 볼록 입체(원기둥/원뿔/구 등 곡면 포함)의 단면 다각형.
+ * positions는 정점 배열(x,y,z 나열), index는 삼각형 인덱스(없으면 순차).
+ * 평면∩볼록입체는 볼록 단일 루프이므로 각도 정렬로 충분하다.
+ */
+export function intersectTriangles(
+  positions: ArrayLike<number>,
+  index: ArrayLike<number> | null,
+  plane: PlaneDef,
+): Vec3[] {
+  const triCount = index ? index.length / 3 : positions.length / 9;
+  const get = (vi: number): Vec3 => [positions[vi * 3], positions[vi * 3 + 1], positions[vi * 3 + 2]];
+  const pts: Vec3[] = [];
+  const push = (p: Vec3) => {
+    if (!pts.some((q) => Math.hypot(q[0] - p[0], q[1] - p[1], q[2] - p[2]) < 1e-9)) pts.push(p);
+  };
+  for (let t = 0; t < triCount; t++) {
+    const ia = index ? index[t * 3] : t * 3;
+    const ib = index ? index[t * 3 + 1] : t * 3 + 1;
+    const ic = index ? index[t * 3 + 2] : t * 3 + 2;
+    const a = get(ia);
+    const b = get(ib);
+    const c = get(ic);
+    const edges: Array<[Vec3, Vec3]> = [[a, b], [b, c], [c, a]];
+    for (const [p, q] of edges) {
+      const dp = signedDist(p, plane);
+      const dq = signedDist(q, plane);
+      if (Math.abs(dp) < 1e-9 && Math.abs(dq) < 1e-9) {
+        push(p);
+        push(q);
+      } else if (Math.abs(dp) < 1e-9) {
+        push(p);
+      } else if (Math.abs(dq) < 1e-9) {
+        push(q);
+      } else if (dp * dq < 0) {
+        const k = dp / (dp - dq);
+        push([p[0] + (q[0] - p[0]) * k, p[1] + (q[1] - p[1]) * k, p[2] + (q[2] - p[2]) * k]);
+      }
+    }
+  }
+  return simplifyCollinear(orderPolygon(pts, plane.normal));
+}
+
+/**
+ * 한 직선 위에 겹쳐 있는 연속 정점 제거 (삼각분할된 면의 대각선이 잘릴 때 생김).
+ * 볼록 단면의 모양·넓이는 그대로, 꼭짓점 수만 최소화한다.
+ */
+export function simplifyCollinear(points: Vec3[], eps = 1e-7): Vec3[] {
+  let cur = points;
+  for (let iter = 0; iter < 10; iter++) {
+    if (cur.length <= 3) return cur;
+    const next: Vec3[] = [];
+    let removed = false;
+    for (let i = 0; i < cur.length; i++) {
+      const prev = cur[(i - 1 + cur.length) % cur.length];
+      const p = cur[i];
+      const nxt = cur[(i + 1) % cur.length];
+      const ex = nxt[0] - prev[0];
+      const ey = nxt[1] - prev[1];
+      const ez = nxt[2] - prev[2];
+      const len = Math.hypot(ex, ey, ez);
+      if (len < 1e-12) {
+        removed = true;
+        continue;
+      }
+      // |prev→p × prev→next| / |prev→next| = 직선까지의 거리
+      const ax = p[0] - prev[0];
+      const ay = p[1] - prev[1];
+      const az = p[2] - prev[2];
+      const cx = ay * ez - az * ey;
+      const cy = az * ex - ax * ez;
+      const cz = ax * ey - ay * ex;
+      if (Math.hypot(cx, cy, cz) / len < eps) {
+        removed = true;
+        continue;
+      }
+      next.push(p);
+    }
+    cur = next;
+    if (!removed) return cur;
+  }
+  return cur;
+}
+
 /** 3D 다각형의 넓이 (Newell 방법 — 어느 평면에 있어도 동작). */
 export function polygonArea3D(points: Vec3[]): number {
   if (points.length < 3) return 0;
