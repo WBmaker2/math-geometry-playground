@@ -31,7 +31,6 @@ export class App {
   private solid: THREE.Group | null = null;
   private net: NetMorph | null = null;
   private func: FuncSurface | null = null;
-  private water: THREE.Mesh | null = null;
   private unitCubes: THREE.Group | null = null;
   private clipPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 0);
   private planeHelper: THREE.Mesh;
@@ -187,11 +186,6 @@ export class App {
       this.cap.geometry.dispose();
       this.cap = null;
     }
-    if (this.water) {
-      this.stage.remove(this.water);
-      this.water.geometry.dispose();
-      this.water = null;
-    }
     if (this.unitCubes) {
       this.stage.remove(this.unitCubes);
       this.unitCubes.traverse((o) => {
@@ -241,7 +235,7 @@ export class App {
         this.solid = solidGroup(s.solidId, size);
         this.net = new NetMorph(s.solidId, size);
         this.stage.add(this.solid, this.net.group);
-        this.buildVolumeHelpers(size.s);
+        this.buildUnitCubes(size.s);
         // 단면 뷰에서만 클리핑 적용
         this.solid.traverse((o) => {
           const m = o as THREE.Mesh;
@@ -257,18 +251,8 @@ export class App {
     void canvas;
   }
 
-  private buildVolumeHelpers(s: number) {
+  private buildUnitCubes(s: number) {
     if (!this.solid) return;
-    // 물 채우기: 반투명 파란 상자
-    const waterGeo = new THREE.BoxGeometry(s * 0.94, 1, s * 0.94);
-    waterGeo.translate(0, 0.5, 0);
-    this.water = new THREE.Mesh(
-      waterGeo,
-      new THREE.MeshStandardMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.55, roughness: 0.2 }),
-    );
-    this.water.position.y = -s / 2;
-    this.water.scale.y = 0.001;
-    this.stage.add(this.water);
     // 단위立方: s=2 → 2×2×2 = 8개 작은 정육면체
     const cubes = new THREE.Group();
     const n = Math.max(1, Math.round(s));
@@ -311,33 +295,21 @@ export class App {
       // 펼칠수록 입체는 투명하게, 전개도는 선명하게
       this.solid.visible = s.unfoldT < 0.85;
       this.net.group.visible = s.unfoldT > 0.02;
-      const boxLike = supportsVolumeFill(s.solidId);
-      const showFill = boxLike && !store.get().showUnitCubes && s.unfoldT < 0.5;
-      const showCubes = boxLike && store.get().showUnitCubes && s.unfoldT < 0.5;
-      // 물·단위立方체를 볼 때는 상자를 유리처럼 비치게 (내용물이 보이도록)
-      const glass = showFill || showCubes;
+      const showCubes = supportsVolumeFill(s.solidId) && store.get().showUnitCubes && s.unfoldT < 0.5;
+      // 단위立方체를 볼 때는 상자를 유리처럼 비치게 (내용물이 보이도록)
       this.solid.traverse((o) => {
         const m = o as THREE.Mesh;
         const mat = m.material as THREE.MeshStandardMaterial | undefined;
         if (mat && 'opacity' in mat) {
-          mat.opacity = glass ? 0.28 : 0.96 * (1 - s.unfoldT * 0.7);
+          mat.opacity = showCubes ? 0.28 : 0.96 * (1 - s.unfoldT * 0.7);
         }
       });
-      if (this.water) {
-        const size = defaultSize(s.solidId);
-        // 상자형(정육면체·직육면체)에서만 물 채우기 표시.
-        // 다른 입체에서는 박스형 물통이 겉으로 삐져나와 이상하게 보여 숨긴다.
-        // 펼치면(전개도) 물·단위立方체는 숨겨 전개도가 겹쳐 보이지 않게
-        this.water.visible = showFill;
-        this.water.scale.y = Math.max(0.001, size.s * s.volumeFill);
-      }
       if (this.unitCubes) {
         this.unitCubes.visible = showCubes;
       }
     } else if (s.view === 'slice') {
       this.net.group.visible = false;
       this.solid.visible = true;
-      if (this.water) this.water.visible = false;
       if (this.unitCubes) this.unitCubes.visible = false;
       this.solid.traverse((o) => {
         const m = o as THREE.Mesh;
@@ -395,12 +367,7 @@ export class App {
   private syncControlValues() {
     const s = store.get();
     if (s.view === 'solid') {
-      const fill = this.root.querySelector<HTMLInputElement>('#fill');
-      if (fill && document.activeElement !== fill) {
-        fill.value = String(Math.round(s.volumeFill * 100));
-      }
-      const fillVal = this.root.querySelector('#fill-val');
-      if (fillVal) fillVal.textContent = `${Math.round(s.volumeFill * 100)}%`;
+      // 펼치기 값은 Panels 구독에서 동기화 (드래그 중인 입력은 건드리지 않음)
     } else if (s.view === 'func') {
       const v = parabolaVertex({ a: s.a, b: s.b, c: s.c });
       const fv = this.root.querySelector('#func-vertex');
@@ -428,21 +395,16 @@ export class App {
     const s = store.get();
     if (view === 'solid') {
       box.innerHTML = `<p class="hint">하단 슬라이더로 펼치기 · 드래그로 회전</p>`;
-      const fillable = supportsVolumeFill(s.solidId);
+      const unitable = supportsVolumeFill(s.solidId);
       side.innerHTML = `
         <div id="unfold-box"></div>
-        ${fillable ? `
-        <label>물 채우기(부피) <span id="fill-val">${Math.round(s.volumeFill * 100)}%</span>
-          <input id="fill" type="range" min="0" max="100" value="${Math.round(s.volumeFill * 100)}" aria-label="부피 물 채우기" /></label>
+        ${unitable ? `
         <label class="check"><input id="cubes" type="checkbox" ${s.showUnitCubes ? 'checked' : ''} /> 단위立方(작은 정육면체) 보기</label>
         ` : `
-        <p class="hint">물 채우기·단위立方체는 상자 모양(정육면체·직육면체)에서만 볼 수 있어요.</p>
+        <p class="hint">단위立方체는 상자 모양(정육면체·직육면체)에서만 볼 수 있어요.</p>
         `}
         <label class="check"><input id="rot" type="checkbox" ${s.autoRotate ? 'checked' : ''} /> 자동 회전</label>`;
       this.sideCleanup = mountUnfoldSlider(side.querySelector('#unfold-box')!);
-      side.querySelector('#fill')?.addEventListener('input', (e) =>
-        store.set({ volumeFill: Number((e.target as HTMLInputElement).value) / 100 }),
-      );
       side.querySelector('#cubes')?.addEventListener('change', (e) =>
         store.set({ showUnitCubes: (e.target as HTMLInputElement).checked }),
       );

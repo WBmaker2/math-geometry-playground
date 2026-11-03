@@ -9,7 +9,6 @@ export interface StoreState {
   solidId: SolidId;
   unfoldT: number;
   autoRotate: boolean;
-  volumeFill: number; // 0..1 물 채우기
   showUnitCubes: boolean;
   sliceOffset: number; // -1..1
   sliceTilt: number; // 0..1
@@ -26,7 +25,6 @@ const initial: StoreState = {
   solidId: 'cube',
   unfoldT: 0,
   autoRotate: true,
-  volumeFill: 0.5,
   showUnitCubes: false,
   sliceOffset: 0,
   sliceTilt: 0,

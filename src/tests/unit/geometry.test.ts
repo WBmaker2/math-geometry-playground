@@ -64,13 +64,13 @@ describe('print SVG contains 6 faces for cube', () => {
   });
 });
 
-describe('volume fill gating', () => {
-  it('상자형(정육면체·직육면체)에서만 물 채우기를 지원', () => {
+describe('volume helpers gating', () => {
+  it('상자형(정육면체·직육면체)에서만 단위立方체를 지원', () => {
     expect(supportsVolumeFill('cube')).toBe(true);
     expect(supportsVolumeFill('cuboid')).toBe(true);
   });
 
-  it('기둥·뿔·구에서는 물 채우기 미지원 (박스가 겉으로 삐져나옴 방지)', () => {
+  it('기둥·뿔·구에서는 단위立方체 미지원', () => {
     for (const id of ['tri-prism', 'square-pyramid', 'tetra', 'cylinder', 'cone', 'sphere'] as const) {
       expect(supportsVolumeFill(id)).toBe(false);
     }
